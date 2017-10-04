@@ -6,6 +6,7 @@ Usage:
 Arguments:
  
 Example:
+    run train.py model/config/fc.yaml opt/config/sgd-128-lr.yaml --ce
 
 Options:
 """
@@ -25,7 +26,7 @@ from utils import MiniBatcher#, MiniBatcherPerClass
 import torchvision.models as tvm
 import datetime
 from opt.loss import *
-from model.fc import fc
+from model.fc import fc, lr
 # from model.cnn import *
 import cPickle as pkl
 from cleverhans.utils_mnist import data_mnist
