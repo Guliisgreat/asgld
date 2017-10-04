@@ -135,7 +135,11 @@ def main(arguments):
                 assert len(sd['param_groups']) ==1
                 sd['param_groups'][0]['lr'] *= tmp_fac
                 opt.load_state_dict(sd)
-
+            if idx > 0 and  'lrpoly' in opt_config :
+                a, b, g = opt_config['lrpoly']
+                sd = opt.state_dict()
+                sd['param_groups'][0]['lr'] = a*((b+idx)**(-g))
+                opt.load_state_dict(sd)
                 
             idxs = batcher.next(idx)
             X_batch = X[torch.LongTensor(idxs)].type(torch.cuda.FloatTensor)
