@@ -26,6 +26,7 @@ from utils import MiniBatcher#, MiniBatcherPerClass
 import torchvision.models as tvm
 import datetime
 from opt.loss import *
+from opt.nsgd import NoisedSGD
 from model.fc import fc, lr
 # from model.cnn import *
 import cPickle as pkl
