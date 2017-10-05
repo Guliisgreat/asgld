@@ -2,14 +2,15 @@
 code based from 
 http://pytorch.org/docs/master/_modules/torch/optim/sgd.html#SGD
 """
-
+from __future__ import division
 from torch.optim.optimizer import Optimizer, required
 
 
 class NoisedSGD(Optimizer):
 
-    def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False):
+    def __init__(self, params, lr=required, dataset_size=required,momentum=0, dampening=0,
+                 weight_decay=0, nesterov=False, ):
+        self.correction = dataset_size ## for the 2 sources of noise in sgld to be balanced
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
                         weight_decay=weight_decay, nesterov=nesterov)
         if nesterov and (momentum <= 0 or dampening != 0):
@@ -55,8 +56,8 @@ class NoisedSGD(Optimizer):
                         d_p = d_p.add(momentum, buf)
                     else:
                         d_p = buf
-                noise = d_p.new(d_p.size()).normal_(0, group['lr']**.5)
-                p.data.add_(-group['lr']/2, d_p)
+                noise = d_p.new(d_p.size()).normal_(0, (group['lr']/self.correction)**.5)
+                p.data.add_(-group['lr']/2 , d_p)
                 p.data.add_(-1, noise)
 
         return loss
