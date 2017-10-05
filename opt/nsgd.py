@@ -56,7 +56,7 @@ class NoisedSGD(Optimizer):
                     else:
                         d_p = buf
                 noise = d_p.new(d_p.size()).normal_(0, group['lr']**.5)
-                p.data.add_(-group['lr'], d_p)
+                p.data.add_(-group['lr']/2, d_p)
                 p.data.add_(-1, noise)
 
         return loss

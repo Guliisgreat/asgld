@@ -6,7 +6,16 @@ Usage:
 Arguments:
  
 Example:
-    run train.py model/config/fc.yaml opt/config/sgd-128-lr.yaml --ce
+    right now there are 2 models
+    'fc' for fully-connect NNs
+    'lr' for Logistic regression 
+    and 3 optimizer
+    'sgd' ...
+    'nsgd' sgd with added Gaussian Noise, but learn-rate not decayed properly
+    'sgld' sgd with added Gaussian Noise, and both decayed polynomially
+    python train.py model/config/lr.yaml opt/config/sgd-128-lr.yaml --ce
+    python train.py model/config/lr.yaml opt/config/nsgd-128-lr.yaml --ce
+    python train.py model/config/lr.yaml opt/config/sgld-128-lr.yaml --ce
 
 Options:
 """
