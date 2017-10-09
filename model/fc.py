@@ -39,6 +39,7 @@ class fc(object):
     def load(self, name):
         dic = torch.load(name)
         self.model.load_state_dict(dic['model'])
+    
     def type(self, dtype):
         self.model.type(dtype)
 

@@ -20,6 +20,13 @@ Example:
 Options:
 """
 from __future__ import division
+"""
+known todos:
+1. check the threshold for starting to collect samples
+2. don't do "model.model.state_dict", write a wrapper for each model class
+3. right now only keeping <sample_size> posterior samples to prevent memory problems... fix this
+"""
+import copy
 from docopt import docopt
 import yaml
 import torch
@@ -82,8 +89,8 @@ def main(arguments):
     X, Y, X_test, Y_test = data_mnist() #(N, W, H, C) ...  
     Y_val = Y[-NUM_VALID:]
     X_val = X[-NUM_VALID:]
-    Y = Y[:NUM_VALID]
-    X = X[:NUM_VALID]
+    Y = Y[:np.min([opt_config['dataset_size'],NUM_VALID])]
+    X = X[:np.min([opt_config['dataset_size'],NUM_VALID])]
 
     X = tfv(X)
     Y = tft(Y)
@@ -135,9 +142,16 @@ def main(arguments):
     best_val_acc = 0
     val_errors = []
     tf.global_variables_initializer().run()
+    posterior_samples =[]
+    posterior_weights = []
+    is_collecting = False
+    alpha_thresh = 0.01
+    sample_size = 200
+    sample_interval = 20
     if not arguments['--db']:
         ## Algorithm
         for idx in tqdm(xrange(opt_config['max_train_iters'])):
+        # for idx in (xrange(opt_config['max_train_iters'])):
             if 'lrsche' in opt_config and opt_config['lrsche'] != [] and opt_config['lrsche'][0][0] == idx:
                 _, tmp_fac = opt_config['lrsche'].pop(0)
                 sd = opt.state_dict()
@@ -147,7 +161,8 @@ def main(arguments):
             if idx > 0 and  'lrpoly' in opt_config :
                 a, b, g = opt_config['lrpoly']
                 sd = opt.state_dict()
-                sd['param_groups'][0]['lr'] = a*((b+idx)**(-g))
+                step_size = a*((b+idx)**(-g))
+                sd['param_groups'][0]['lr'] = step_size
                 opt.load_state_dict(sd)
                 
             idxs = batcher.next(idx)
@@ -160,7 +175,7 @@ def main(arguments):
             loss, G, train_pred = Loss.train(F, Y_batch)
 
             model.zero_grad()
-            tv_F.backward(gradient=G.type(torch.cuda.FloatTensor))
+            tv_F.backward(gradient=G.type(torch.cuda.FloatTensor),retain_variables=True)
             opt.step()
 
 
@@ -175,8 +190,38 @@ def main(arguments):
             tmp = Y_batch.numpy()
             train_writer.add_summary(acc+loss, idx)
 
+            ## monitor gradient variance
+            ## TODO: this is extremely stupid...
+            if is_collecting ==False and  idx>0 and idx%sample_interval==0:
+                oG = G.type(torch.cuda.FloatTensor)
+                gs = []
+                for gidx in xrange(oG.size()[0]):
+                    model.zero_grad()
+                    tv_F.backward(gradient=oG[gidx][None].repeat(batcher.batch_size,1),retain_variables=True)
+                    ps = list(model.parameters())
+                    g = torch.cat([p.grad.view(-1,1) for p in ps])
+                    gs.append(g)
+                gs = torch.cat(gs,1).t() ## (N, D) gradient matrix
+                gs_centered = gs - gs.mean(0).expand_as(gs)
+                V_s = (1/opt.correction)*torch.mm(gs_centered,gs_centered.t()) ## (D, D), hopefully V_s in the paper
+                _,s,_ = torch.svd(V_s.data)
+                alpha = s[0] * step_size * opt.correction / batcher.batch_size
+                # print ("variance")
+                # print(s[0])
+                # print ("alpha")
+                # print (alpha)
+                if alpha < alpha_thresh and idx > 5000: #todo: ... 
+                    is_collecting = True
+
+            if is_collecting  and idx%sample_interval==0: 
+                posterior_samples.append(copy.deepcopy(model.model.state_dict()))
+                posterior_weights.append(step_size)
+                if len(posterior_samples) > sample_size:
+                    del posterior_samples[0]
+                    del posterior_weights[0]
             #validate
             if idx>0 and idx%200==0:
+                curr_state = model.model.state_dict()
                 def _validate_batch(model, X_val_batch, Y_val_batch):
                     model.eval()
                     val_pred = Loss.infer(model, Variable(torch.FloatTensor(X_val_batch)).type(torch.cuda.FloatTensor))
@@ -184,14 +229,36 @@ def main(arguments):
                     model.train()
                     return val_accuracy
                 
+
                 val_batch_size = batcher.batch_size
                 val_batches = Y_val.shape[0] // val_batch_size
                 v1 = []
                 for vidx in xrange(val_batches):
                     val_accuracy = _validate_batch(model, X_val[vidx*val_batch_size:(vidx+1)*val_batch_size], Y_val[vidx*val_batch_size:(vidx+1)*val_batch_size])
                     v1.append(val_accuracy)
+                def _validate_batch_bayes(posterior_samples,posterior_weights, X_val_batch, Y_val_batch):
+                    model.eval()
+                    acc_proba = None
+                    for sample_idx in xrange(len(posterior_samples)):
+                        p_sample = posterior_samples[sample_idx]
+                        model.model.load_state_dict(p_sample)
+                        _,proba = Loss.infer(model, Variable(torch.FloatTensor(X_val_batch)).type(torch.cuda.FloatTensor), ret_proba=True)
+                        if acc_proba is None:
+                            acc_proba = posterior_weights[sample_idx] * proba
+                        else:
+                            acc_proba += posterior_weights[sample_idx] * proba
+                    model.train()
+                    val_pred = acc_proba.argmax(1)    
+                    val_accuracy = np.mean(Y_val_batch.argmax(1) == val_pred)
+                    return val_accuracy
+                bayes_v = []
+                if is_collecting:
+                    for vidx in xrange(val_batches):
+                        val_accuracy = _validate_batch_bayes(posterior_samples[-sample_size:],posterior_weights[-sample_size:], X_val[vidx*val_batch_size:(vidx+1)*val_batch_size], Y_val[vidx*val_batch_size:(vidx+1)*val_batch_size])
+                        bayes_v.append(val_accuracy)
                 val_accuracy = np.mean(v1)
-                print (val_accuracy)
+                bayes_acc = np.mean(bayes_v)
+                print (val_accuracy, bayes_acc)
                 acc= sess.run(tf_acc, feed_dict={ph_accuracy:val_accuracy})
                 val_writer.add_summary(acc, idx)
                 val_errors.append(val_accuracy)
@@ -201,6 +268,7 @@ def main(arguments):
                     print ("[Saving to]")
                     print (name)
                     model.save(name)
+                model.model.load_state_dict(curr_state)
             ## checkpoint
             if idx>0 and idx%1000==0:
                 name = './saves/%s/model_%i.t7'%(exp_name,idx)

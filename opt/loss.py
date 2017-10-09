@@ -22,8 +22,12 @@ class CE(object):
         train_pred = py_x.data.numpy().argmax(1)
         return loss.data[0], G, train_pred
 
-    def infer(self, model, X_val):
+    def infer(self, model, X_val, ret_proba=False):
         py_x = self.lsoftmax(model.forward(X_val))
-        val_pred = py_x.data.cpu().numpy().argmax(1)
-        return val_pred
+        proba = py_x.data.cpu().numpy()
+        val_pred = proba.argmax(1)
+        if ret_proba:
+            return val_pred, proba
+        else:
+            return val_pred
   
